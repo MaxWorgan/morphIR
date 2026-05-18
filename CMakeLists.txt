@@ -39,7 +39,11 @@ juce_add_plugin(MorphIR
 target_sources(MorphIR PRIVATE
     src/MorphIRProcessor.cpp
     src/MorphIREditor.cpp
+    engine/nupc/NUPCEngine.cpp
+    engine/fft/VDSPFFTProvider.cpp
 )
+
+target_include_directories(MorphIR PRIVATE engine)
 
 target_include_directories(MorphIR PRIVATE src)
 
@@ -61,7 +65,9 @@ target_link_libraries(MorphIR PRIVATE
 add_executable(MorphIR_Tests
     tests/TestRunner.cpp
     tests/FFTProviderTest.cpp
+    tests/NUPCEngineTest.cpp
     engine/fft/VDSPFFTProvider.cpp
+    engine/nupc/NUPCEngine.cpp
 )
 
 target_include_directories(MorphIR_Tests PRIVATE engine)
