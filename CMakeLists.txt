@@ -39,7 +39,11 @@ juce_add_plugin(MorphIR
 target_sources(MorphIR PRIVATE
     src/MorphIRProcessor.cpp
     src/MorphIREditor.cpp
+    engine/ir/IRLoader.cpp
+    engine/fft/VDSPFFTProvider.cpp
 )
+
+target_include_directories(MorphIR PRIVATE engine)
 
 target_include_directories(MorphIR PRIVATE src)
 
@@ -61,7 +65,9 @@ target_link_libraries(MorphIR PRIVATE
 add_executable(MorphIR_Tests
     tests/TestRunner.cpp
     tests/FFTProviderTest.cpp
+    tests/IRLoaderTest.cpp
     engine/fft/VDSPFFTProvider.cpp
+    engine/ir/IRLoader.cpp
 )
 
 target_include_directories(MorphIR_Tests PRIVATE engine)
@@ -70,10 +76,12 @@ target_compile_definitions(MorphIR_Tests PRIVATE
     JUCE_STANDALONE_APPLICATION=1
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
+    JUCE_USE_OGGVORBIS=0
 )
 
 target_link_libraries(MorphIR_Tests PRIVATE
     juce::juce_core
+    juce::juce_audio_formats
     "-framework Accelerate"
 )
 
