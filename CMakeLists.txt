@@ -58,6 +58,28 @@ target_link_libraries(MorphIR PRIVATE
     juce::juce_recommended_warning_flags
 )
 
+add_executable(MorphIR_Tests
+    tests/TestRunner.cpp
+    tests/FFTProviderTest.cpp
+    engine/fft/VDSPFFTProvider.cpp
+)
+
+target_include_directories(MorphIR_Tests PRIVATE engine)
+
+target_compile_definitions(MorphIR_Tests PRIVATE
+    JUCE_STANDALONE_APPLICATION=1
+    JUCE_USE_CURL=0
+    JUCE_WEB_BROWSER=0
+)
+
+target_link_libraries(MorphIR_Tests PRIVATE
+    juce::juce_core
+    "-framework Accelerate"
+)
+
+enable_testing()
+add_test(NAME MorphIR_Tests COMMAND MorphIR_Tests)
+
 clap_juce_extensions_plugin(
     TARGET MorphIR
     CLAP_ID "com.morphir.morphir"
