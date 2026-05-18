@@ -42,6 +42,7 @@ target_sources(MorphIR PRIVATE
     engine/nupc/NUPCEngine.cpp
     engine/ir/IRLoader.cpp
     engine/morph/SpectralMorpher.cpp
+    engine/morph/MorphThread.cpp
     engine/fft/VDSPFFTProvider.cpp
 )
 
@@ -68,10 +69,12 @@ add_executable(MorphIR_Tests
     tests/NUPCEngineTest.cpp
     tests/IRLoaderTest.cpp
     tests/SpectralMorpherTest.cpp
+    tests/MorphThreadTest.cpp
     engine/fft/VDSPFFTProvider.cpp
     engine/nupc/NUPCEngine.cpp
     engine/ir/IRLoader.cpp
     engine/morph/SpectralMorpher.cpp
+    engine/morph/MorphThread.cpp
 )
 
 target_include_directories(MorphIR_Tests PRIVATE engine)

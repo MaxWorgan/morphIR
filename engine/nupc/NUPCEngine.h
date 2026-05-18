@@ -2,6 +2,7 @@
 #include "../fft/FFTProvider.h"
 #include <complex>
 #include <vector>
+#include <atomic>
 #include <cstddef>
 
 namespace morphir {
@@ -11,42 +12,56 @@ class NUPCEngine
 public:
     NUPCEngine(FFTProvider& fft, std::size_t maxIRSamples, int blockSize);
 
-    // Load a new IR. Must not be called concurrently with process().
+    // Load a new IR into both front and back buffers. Must not be called
+    // concurrently with process() or loadIRToBack(). Use for initial setup.
     void loadIR(const float* irData, std::size_t irLength);
+
+    // Load an IR into the back buffer and signal a swap. Called from the
+    // morph thread. Returns false if a previous swap is still pending
+    // (audio thread hasn't consumed it yet); caller should retry later.
+    bool loadIRToBack(const float* irData, std::size_t irLength);
 
     // Process one block in-place. Audio thread only. Never allocates.
     void process(float* block, int numSamples);
 
+    std::size_t getMaxIRSamples() const { return maxIRSamples; }
+
 private:
     struct Partition
     {
-        std::size_t size;           // partition size in samples
-        std::size_t fftSize;        // 2 * size (linear convolution)
-        std::size_t irOffset;       // offset into IR in samples
-        int         scheduleEvery;  // process every N blocks
-        int         schedulePhase;  // which block phase triggers this partition
+        std::size_t size;
+        std::size_t fftSize;
+        std::size_t irOffset;
+        int         scheduleEvery;
+        int         schedulePhase;
 
-        std::vector<std::complex<float>> irFFT;      // pre-computed IR partition FFT
-        std::vector<std::complex<float>> inputFFT;   // scratch: FFT of current input segment
-        std::vector<std::complex<float>> accumFFT;   // accumulated output spectrum
-        std::vector<float>               overlapBuf; // overlap-add tail
+        // Double-buffered IR FFT. Audio thread reads [activeIdx];
+        // morph thread writes [1 - activeIdx].
+        std::vector<std::complex<float>> irFFT[2];
+
+        std::vector<std::complex<float>> inputFFT;
+        std::vector<std::complex<float>> accumFFT;
+        std::vector<float>               overlapBuf;
     };
 
     void buildSchedule();
-    void processPartition(Partition& p, int blockIndex);
+    void writeIRToBuffer(int bufferIdx, const float* irData, std::size_t irLength);
+    void processPartition(Partition& p, int currentBlock, int readIdx);
 
     FFTProvider&              fft;
     std::size_t               maxIRSamples;
     int                       blockSize;
 
     std::vector<Partition>    partitions;
-    std::vector<float>        delayLine;   // circular input history
-    std::vector<float>        outputBuf;   // overlap-add output accumulator
-    int                       writePos  = 0;
+    std::vector<float>        delayLine;
+    std::vector<float>        outputBuf;
+    int                       writePos   = 0;
     int                       blockIndex = 0;
 
-    // Scratch buffer for FFT input (reused every block, pre-allocated)
     std::vector<float>        fftScratch;
+
+    std::atomic<int>          activeIdx   { 0 };
+    std::atomic<bool>         swapPending { false };
 };
 
 } // namespace morphir
