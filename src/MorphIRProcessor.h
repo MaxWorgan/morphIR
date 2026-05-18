@@ -1,11 +1,25 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <memory>
+#include "../engine/fft/FFTProvider.h"
+#include "../engine/ir/IRSlot.h"
+#include "../engine/ir/IRLoader.h"
+#include "../engine/nupc/DualMonoConvolver.h"
 
 class MorphIRProcessor : public juce::AudioProcessor
 {
 public:
+    enum class SlotId { A = 0, B = 1 };
+
+    struct LoadedBundle
+    {
+        morphir::IRSlot left;
+        morphir::IRSlot right;
+        juce::String filePath;
+    };
+
     MorphIRProcessor();
-    ~MorphIRProcessor() override = default;
+    ~MorphIRProcessor() override;
 
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -28,12 +42,52 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    // Synchronous IR load. Safe to call from the message thread; blocks while
+    // the file is decoded and FFT'd (typically tens of ms for short IRs, up to
+    // hundreds for a 30s IR). Returns the error string from IRLoader (empty
+    // on success). Stops and restarts the morph thread around the swap.
+    juce::String loadSlot(SlotId slot, const juce::File& file);
+
+    // Path of the file currently loaded in the slot, or empty if none.
+    juce::String getSlotFilePath(SlotId slot) const;
+
     juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
+    void rebuildEngine(double sampleRate, int blockSize);
+    bool slotsReady() const;
+    void rebindConvolverSlots();
+
     juce::AudioProcessorValueTreeState apvts;
+
+    std::unique_ptr<morphir::FFTProvider>       fftProvider;
+    std::unique_ptr<morphir::IRLoader>          irLoader;
+    std::unique_ptr<morphir::DualMonoConvolver> convolver;
+
+    LoadedBundle slotA;
+    LoadedBundle slotB;
+    juce::CriticalSection slotLock; // guards loadSlot / rebuild
+
+    double currentSampleRate = 0.0;
+    int    currentBlockSize  = 0;
+    std::size_t currentMaxIRSamples = 0;
+
+    static constexpr float kMaxPreDelayMs = 500.0f;
+
+    // Pre-delay ring buffers, one per channel.
+    juce::AudioBuffer<float> preDelayBuffer;
+    int preDelaySize = 0;
+    int preDelayWritePos = 0;
+
+    // Pre-allocated copy buffer for the dry signal.
+    juce::AudioBuffer<float> dryScratch;
+
+    std::atomic<float>* morphPositionParam = nullptr;
+    std::atomic<float>* dryWetParam        = nullptr;
+    std::atomic<float>* outputGainParam    = nullptr;
+    std::atomic<float>* preDelayParam      = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MorphIRProcessor)
 };

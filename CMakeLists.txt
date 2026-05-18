@@ -39,6 +39,7 @@ juce_add_plugin(MorphIR
 target_sources(MorphIR PRIVATE
     src/MorphIRProcessor.cpp
     src/MorphIREditor.cpp
+    src/IRSlotPanel.cpp
     engine/nupc/NUPCEngine.cpp
     engine/nupc/DualMonoConvolver.cpp
     engine/ir/IRLoader.cpp

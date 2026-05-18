@@ -1,0 +1,50 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [created]
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build plugin
+        run: cmake --build build --config Release --target MorphIR_All
+
+      - name: Build CLAP
+        run: cmake --build build --config Release --target MorphIR_CLAP
+
+      - name: Build tests
+        run: cmake --build build --config Release --target MorphIR_Tests
+
+      - name: Run tests
+        run: ./build/MorphIR_Tests
+
+      - name: Package artefacts
+        run: |
+          mkdir -p dist
+          cp -R build/MorphIR_artefacts/Release/VST3/MorphIR.vst3   dist/
+          cp -R build/MorphIR_artefacts/Release/AU/MorphIR.component dist/
+          cp -R build/MorphIR_artefacts/Release/CLAP/MorphIR.clap   dist/
+          cd dist && zip -r ../MorphIR-macOS.zip .
+
+      - name: Upload artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MorphIR-macOS
+          path: MorphIR-macOS.zip
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MorphIR-macOS.zip
