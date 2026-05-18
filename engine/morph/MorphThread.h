@@ -10,30 +10,33 @@
 
 namespace morphir {
 
-// Background thread that continuously computes a spectrally-blended IR
-// from two slots and feeds it into the NUPCEngine via its back buffer.
-// One MorphThread instance drives one NUPCEngine (single channel).
+// Background thread that computes spectrally-blended IRs from slot pairs and
+// feeds them into one or more NUPCEngines via their back buffers. All channels
+// share the same morph position, so morphing is sample-coherent across them.
 class MorphThread : public juce::Thread
 {
 public:
+    struct Channel
+    {
+        NUPCEngine*   engine = nullptr;
+        const IRSlot* slotA  = nullptr;
+        const IRSlot* slotB  = nullptr;
+    };
+
     MorphThread(FFTProvider& fft,
-                NUPCEngine&  engine,
                 std::size_t  fftSize,
                 int          updateIntervalMs = 25);
 
-    // Set the IR slots to morph between. Must not be called while the thread
-    // is running; stop the thread, set slots, then start.
-    void setSlots(const IRSlot* a, const IRSlot* b);
+    // Replace the channel list. Stop the thread, set channels, then start.
+    void setChannels(std::vector<Channel> newChannels);
 
-    // Atomic morph position [0.0, 1.0]. Safe to write from any thread.
-    void setMorphPosition(float t) { morphPosition.store(t, std::memory_order_release); }
-    float getMorphPosition() const { return morphPosition.load(std::memory_order_acquire); }
+    void  setMorphPosition(float t) { morphPosition.store(t, std::memory_order_release); }
+    float getMorphPosition() const  { return morphPosition.load(std::memory_order_acquire); }
 
     void run() override;
 
 private:
     FFTProvider&        fft;
-    NUPCEngine&         engine;
     SpectralMorpher     morpher;
     std::size_t         fftSize;
     int                 updateIntervalMs;
@@ -41,8 +44,7 @@ private:
     std::vector<float>  blendedIR;
     std::atomic<float>  morphPosition { 0.0f };
 
-    const IRSlot* slotA = nullptr;
-    const IRSlot* slotB = nullptr;
+    std::vector<Channel> channels;
 };
 
 } // namespace morphir

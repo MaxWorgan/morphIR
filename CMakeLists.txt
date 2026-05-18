@@ -40,6 +40,7 @@ target_sources(MorphIR PRIVATE
     src/MorphIRProcessor.cpp
     src/MorphIREditor.cpp
     engine/nupc/NUPCEngine.cpp
+    engine/nupc/DualMonoConvolver.cpp
     engine/ir/IRLoader.cpp
     engine/morph/SpectralMorpher.cpp
     engine/morph/MorphThread.cpp
@@ -70,8 +71,10 @@ add_executable(MorphIR_Tests
     tests/IRLoaderTest.cpp
     tests/SpectralMorpherTest.cpp
     tests/MorphThreadTest.cpp
+    tests/DualMonoConvolverTest.cpp
     engine/fft/VDSPFFTProvider.cpp
     engine/nupc/NUPCEngine.cpp
+    engine/nupc/DualMonoConvolver.cpp
     engine/ir/IRLoader.cpp
     engine/morph/SpectralMorpher.cpp
     engine/morph/MorphThread.cpp

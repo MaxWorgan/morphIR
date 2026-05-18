@@ -101,8 +101,8 @@ public:
             // Initial state: load slot A as starting IR
             engine.loadIR(slotA.samples.data(), slotA.originalLength);
 
-            morphir::MorphThread morphThread(*fft, engine, fftSize, /*updateMs=*/10);
-            morphThread.setSlots(&slotA, &slotB);
+            morphir::MorphThread morphThread(*fft, fftSize, /*updateMs=*/10);
+            morphThread.setChannels({ { &engine, &slotA, &slotB } });
             morphThread.setMorphPosition(0.0f);
             morphThread.startThread();
 

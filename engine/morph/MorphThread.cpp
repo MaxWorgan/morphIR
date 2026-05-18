@@ -3,12 +3,10 @@
 namespace morphir {
 
 MorphThread::MorphThread(FFTProvider& fft,
-                         NUPCEngine&  engine,
                          std::size_t  fftSize,
                          int          updateIntervalMs)
     : juce::Thread("MorphIR Morph Thread")
     , fft(fft)
-    , engine(engine)
     , morpher(fft, fftSize)
     , fftSize(fftSize)
     , updateIntervalMs(updateIntervalMs)
@@ -16,28 +14,30 @@ MorphThread::MorphThread(FFTProvider& fft,
 {
 }
 
-void MorphThread::setSlots(const IRSlot* a, const IRSlot* b)
+void MorphThread::setChannels(std::vector<Channel> newChannels)
 {
-    slotA = a;
-    slotB = b;
+    channels = std::move(newChannels);
 }
 
 void MorphThread::run()
 {
     while (! threadShouldExit())
     {
-        if (slotA != nullptr && slotB != nullptr
-            && slotA->loaded && slotB->loaded
-            && slotA->fft.size() == fftSize / 2 + 1
-            && slotB->fft.size() == fftSize / 2 + 1)
-        {
-            const float t = morphPosition.load(std::memory_order_acquire);
-            morpher.morph(*slotA, *slotB, t, blendedIR.data(), fftSize);
+        const float t = morphPosition.load(std::memory_order_acquire);
 
-            // Push to NUPCEngine. If the audio thread hasn't consumed the
-            // previous update, this returns false — we just sleep and retry.
-            engine.loadIRToBack(blendedIR.data(),
-                                std::min(blendedIR.size(), engine.getMaxIRSamples()));
+        for (auto& ch : channels)
+        {
+            if (ch.engine == nullptr || ch.slotA == nullptr || ch.slotB == nullptr)
+                continue;
+            if (! ch.slotA->loaded || ! ch.slotB->loaded)
+                continue;
+            if (ch.slotA->fft.size() != fftSize / 2 + 1
+                || ch.slotB->fft.size() != fftSize / 2 + 1)
+                continue;
+
+            morpher.morph(*ch.slotA, *ch.slotB, t, blendedIR.data(), fftSize);
+            ch.engine->loadIRToBack(blendedIR.data(),
+                                    std::min(blendedIR.size(), ch.engine->getMaxIRSamples()));
         }
 
         wait(updateIntervalMs);

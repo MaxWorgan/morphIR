@@ -12,13 +12,12 @@ class NUPCEngine
 public:
     NUPCEngine(FFTProvider& fft, std::size_t maxIRSamples, int blockSize);
 
-    // Load a new IR into both front and back buffers. Must not be called
-    // concurrently with process() or loadIRToBack(). Use for initial setup.
+    // Load IR into both front and back buffers. Not safe to call concurrently
+    // with process() or loadIRToBack().
     void loadIR(const float* irData, std::size_t irLength);
 
-    // Load an IR into the back buffer and signal a swap. Called from the
-    // morph thread. Returns false if a previous swap is still pending
-    // (audio thread hasn't consumed it yet); caller should retry later.
+    // Load IR into the back buffer and signal a swap. Returns false if a
+    // previous swap is still pending. Called from the morph thread.
     bool loadIRToBack(const float* irData, std::size_t irLength);
 
     // Process one block in-place. Audio thread only. Never allocates.
@@ -29,39 +28,47 @@ public:
 private:
     struct Partition
     {
-        std::size_t size;
-        std::size_t fftSize;
-        std::size_t irOffset;
-        int         scheduleEvery;
-        int         schedulePhase;
+        std::size_t size;          // P
+        std::size_t fftSize;       // 2P (linear convolution)
+        std::size_t irOffset;      // start of this partition in the IR
+        int         scheduleEvery; // run every N blocks
+        int         schedulePhase; // run when blockIndex % scheduleEvery == phase
 
-        // Double-buffered IR FFT. Audio thread reads [activeIdx];
-        // morph thread writes [1 - activeIdx].
+        // Double-buffered IR FFT.
         std::vector<std::complex<float>> irFFT[2];
 
-        std::vector<std::complex<float>> inputFFT;
-        std::vector<std::complex<float>> accumFFT;
-        std::vector<float>               overlapBuf;
+        // Per-partition overlap (saved second half of last IFFT for this partition).
+        std::vector<float> overlap;
     };
 
     void buildSchedule();
     void writeIRToBuffer(int bufferIdx, const float* irData, std::size_t irLength);
     void processPartition(Partition& p, int currentBlock, int readIdx);
 
-    FFTProvider&              fft;
-    std::size_t               maxIRSamples;
-    int                       blockSize;
+    FFTProvider& fft;
+    std::size_t  maxIRSamples;
+    int          blockSize;
 
-    std::vector<Partition>    partitions;
-    std::vector<float>        delayLine;
-    std::vector<float>        outputBuf;
-    int                       writePos   = 0;
-    int                       blockIndex = 0;
+    std::vector<Partition> partitions;
 
-    std::vector<float>        fftScratch;
+    // Circular input history. Sized so the largest partition's lookback window
+    // fits without aliasing.
+    std::vector<float> delayLine;
+    int                writePos   = 0;
+    int                blockIndex = 0;
 
-    std::atomic<int>          activeIdx   { 0 };
-    std::atomic<bool>         swapPending { false };
+    // Future-output ring: contributions from large partitions span multiple
+    // blocks. Sized to hold the largest partition's output footprint.
+    std::vector<float> outputBuf;
+
+    // Scratch buffers reused by every partition (sized to max fftSize).
+    std::vector<float>               fftInScratch;
+    std::vector<float>               fftOutScratch;
+    std::vector<std::complex<float>> inputSpectrum;
+    std::vector<std::complex<float>> productSpectrum;
+
+    std::atomic<int>  activeIdx   { 0 };
+    std::atomic<bool> swapPending { false };
 };
 
 } // namespace morphir
