@@ -62,10 +62,16 @@ private:
     std::vector<float> outputBuf;
 
     // Scratch buffers reused by every partition (sized to max fftSize).
+    // Audio thread only — see irScratch for the IR-writing paths.
     std::vector<float>               fftInScratch;
     std::vector<float>               fftOutScratch;
     std::vector<std::complex<float>> inputSpectrum;
     std::vector<std::complex<float>> productSpectrum;
+
+    // Dedicated scratch for writeIRToBuffer. The morph thread calls
+    // loadIRToBack concurrently with process(), so it must never share
+    // scratch memory with the audio thread.
+    std::vector<float>               irScratch;
 
     std::atomic<int>  activeIdx   { 0 };
     std::atomic<bool> swapPending { false };

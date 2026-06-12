@@ -3,6 +3,8 @@
 #include "../engine/nupc/NUPCEngine.h"
 #include <vector>
 #include <cmath>
+#include <thread>
+#include <atomic>
 
 class NUPCEngineTests : public juce::UnitTest
 {
@@ -83,6 +85,103 @@ public:
             expectWithinAbsoluteError(output[maxIdx],     1.0f,  0.1f);
             expectWithinAbsoluteError(output[maxIdx + 1], 0.5f,  0.1f);
             expectWithinAbsoluteError(output[maxIdx + 2], 0.25f, 0.1f);
+        }
+
+        beginTest("Long IR spanning multiple partition levels matches direct convolution");
+        {
+            // IR length 3000 with blockSize 64 engages level-0 (16 x 64 = 1024)
+            // and level-1 (512-sample) partitions.
+            const std::size_t maxIR = 4096;
+            const std::size_t irLen = 3000;
+            juce::Random rng(42);
+
+            std::vector<float> ir(irLen);
+            for (auto& s : ir)
+                s = (rng.nextFloat() * 2.0f - 1.0f) / 50.0f;
+
+            const int numBlocks = 80;
+            std::vector<float> input(static_cast<std::size_t>(numBlocks * blockSize));
+            for (auto& s : input)
+                s = rng.nextFloat() * 2.0f - 1.0f;
+
+            // Direct convolution reference, double-precision accumulation.
+            std::vector<float> ref(input.size(), 0.0f);
+            for (std::size_t n = 0; n < ref.size(); ++n)
+            {
+                double acc = 0.0;
+                const std::size_t kMax = std::min(irLen - 1, n);
+                for (std::size_t k = 0; k <= kMax; ++k)
+                    acc += static_cast<double>(ir[k]) * static_cast<double>(input[n - k]);
+                ref[n] = static_cast<float>(acc);
+            }
+
+            morphir::NUPCEngine engine(*fftProvider, maxIR, blockSize);
+            engine.loadIR(ir.data(), irLen);
+
+            std::vector<float> out(input);
+            for (int b = 0; b < numBlocks; ++b)
+                engine.process(out.data() + b * blockSize, blockSize);
+
+            float maxRef = 0.0f, maxErr = 0.0f;
+            for (std::size_t n = 0; n < ref.size(); ++n)
+            {
+                maxRef = std::max(maxRef, std::abs(ref[n]));
+                maxErr = std::max(maxErr, std::abs(out[n] - ref[n]));
+            }
+            expect(maxErr <= 1e-3f * maxRef,
+                   "max error " + juce::String(maxErr) + " vs max ref " + juce::String(maxRef));
+        }
+
+        beginTest("Concurrent reloads of an identical IR leave output unchanged");
+        {
+            // Hammering loadIRToBack with the *same* IR data from another
+            // thread must be output-invariant: both double buffers always
+            // hold identical spectra, so swaps cannot change the result.
+            // Any deviation means shared state is being corrupted.
+            const std::size_t maxIR = 4096;
+            const std::size_t irLen = 3000;
+            juce::Random rng(7);
+
+            std::vector<float> ir(irLen);
+            for (auto& s : ir)
+                s = (rng.nextFloat() * 2.0f - 1.0f) / 50.0f;
+
+            const int numBlocks = 1500;
+            std::vector<float> input(static_cast<std::size_t>(numBlocks * blockSize));
+            for (auto& s : input)
+                s = rng.nextFloat() * 2.0f - 1.0f;
+
+            // Reference: same engine config, no concurrent activity.
+            std::vector<float> ref(input);
+            {
+                morphir::NUPCEngine engine(*fftProvider, maxIR, blockSize);
+                engine.loadIR(ir.data(), irLen);
+                for (int b = 0; b < numBlocks; ++b)
+                    engine.process(ref.data() + b * blockSize, blockSize);
+            }
+
+            morphir::NUPCEngine engine(*fftProvider, maxIR, blockSize);
+            engine.loadIR(ir.data(), irLen);
+
+            std::atomic<bool> stop { false };
+            std::thread hammer([&]
+            {
+                while (! stop.load(std::memory_order_acquire))
+                    engine.loadIRToBack(ir.data(), irLen);
+            });
+
+            std::vector<float> out(input);
+            for (int b = 0; b < numBlocks; ++b)
+                engine.process(out.data() + b * blockSize, blockSize);
+
+            stop.store(true, std::memory_order_release);
+            hammer.join();
+
+            float maxDiff = 0.0f;
+            for (std::size_t n = 0; n < out.size(); ++n)
+                maxDiff = std::max(maxDiff, std::abs(out[n] - ref[n]));
+            expect(maxDiff <= 1e-6f,
+                   "output deviated by " + juce::String(maxDiff) + " under concurrent reloads");
         }
 
         beginTest("Engine constructs without crashing for large IR");

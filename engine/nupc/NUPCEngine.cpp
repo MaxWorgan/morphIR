@@ -34,6 +34,7 @@ NUPCEngine::NUPCEngine(FFTProvider& fft, std::size_t maxIRSamples, int blockSize
 
     fftInScratch.assign(maxFftSize, 0.0f);
     fftOutScratch.assign(maxFftSize, 0.0f);
+    irScratch.assign(maxFftSize, 0.0f);
     inputSpectrum.assign(maxFftSize / 2 + 1, {0.0f, 0.0f});
     productSpectrum.assign(maxFftSize / 2 + 1, {0.0f, 0.0f});
 }
@@ -74,16 +75,16 @@ void NUPCEngine::writeIRToBuffer(int bufferIdx, const float* irData, std::size_t
 {
     for (auto& p : partitions)
     {
-        std::fill(fftInScratch.begin(), fftInScratch.begin() + static_cast<long>(p.fftSize), 0.0f);
+        std::fill(irScratch.begin(), irScratch.begin() + static_cast<long>(p.fftSize), 0.0f);
 
         const std::size_t segLen = std::min(p.size,
             irLength > p.irOffset ? irLength - p.irOffset : std::size_t(0));
         if (segLen > 0)
             std::copy(irData + p.irOffset,
                       irData + p.irOffset + segLen,
-                      fftInScratch.begin());
+                      irScratch.begin());
 
-        fft.forward(fftInScratch.data(), p.irFFT[bufferIdx].data(), p.fftSize);
+        fft.forward(irScratch.data(), p.irFFT[bufferIdx].data(), p.fftSize);
     }
 }
 
@@ -119,12 +120,18 @@ void NUPCEngine::processPartition(Partition& p, int currentBlock, int readIdx)
     const int F         = static_cast<int>(p.fftSize);
     const int O         = static_cast<int>(p.irOffset);
 
-    // Build input window: P samples covering input times [n - O - P + 1, n - O].
+    // The partition's first contribution lands at the start of the current
+    // block, which for a partition of size P is (P - blockSize) samples after
+    // the segment's nominal lag O. Read the input window correspondingly more
+    // recent so the contribution is overlap-added at the right time. (Causal
+    // because the schedule guarantees O >= P - blockSize for every level.)
+    const int lag = O - (P - blockSize);
+
+    // Build input window: P samples covering input times [n - lag - P + 1, n - lag].
     // delayLine[writePos - 1] is the most recently written sample (time n).
-    // So we want indices [writePos - O - P, writePos - O - 1].
     for (int i = 0; i < P; ++i)
     {
-        const int srcIdx = ((writePos - O - P + i) + safeBase) % dlen;
+        const int srcIdx = ((writePos - lag - P + i) + safeBase) % dlen;
         fftInScratch[i] = delayLine[srcIdx];
     }
     // Zero-pad the second half (for linear convolution).
