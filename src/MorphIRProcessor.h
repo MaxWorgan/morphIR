@@ -58,7 +58,8 @@ public:
 
 private:
     void rebuildEngine(double sampleRate, int blockSize);
-    bool slotsReady() const;
+    bool slotsReady() const;    // both slots loaded — morphing available
+    bool anySlotReady() const;  // at least one slot loaded — convolution available
     void rebindConvolverSlots();
 
     juce::AudioProcessorValueTreeState apvts;

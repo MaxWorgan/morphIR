@@ -47,6 +47,19 @@ void DualMonoConvolver::setSlots(const IRSlot& leftA,  const IRSlot& leftB,
         morphThread.startThread();
 }
 
+void DualMonoConvolver::setSingleSlot(const IRSlot& left, const IRSlot& right)
+{
+    if (morphThread.isThreadRunning())
+        morphThread.stopThread(500);
+
+    // Detach the morph thread from any previous slots so a later
+    // startMorphing() can't read stale IRSlot pointers.
+    morphThread.setChannels({});
+
+    leftEngine.loadIR(left.samples.data(),  left.originalLength);
+    rightEngine.loadIR(right.samples.data(), right.originalLength);
+}
+
 void DualMonoConvolver::process(float* leftChannel, float* rightChannel, int numSamples)
 {
     leftEngine.process(leftChannel, numSamples);

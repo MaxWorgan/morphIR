@@ -20,6 +20,10 @@ public:
     void setSlots(const IRSlot& leftA,  const IRSlot& leftB,
                   const IRSlot& rightA, const IRSlot& rightB);
 
+    // Bind a single IR pair with no morphing (one slot loaded). Stops the
+    // morph thread; the engines convolve this IR until setSlots is called.
+    void setSingleSlot(const IRSlot& left, const IRSlot& right);
+
     // Atomic morph position [0, 1].
     void  setMorphPosition(float t) { morphThread.setMorphPosition(t); }
     float getMorphPosition() const  { return morphThread.getMorphPosition(); }

@@ -95,11 +95,7 @@ void MorphIRProcessor::rebuildEngine(double sampleRate, int blockSize)
     irLoader  = std::make_unique<morphir::IRLoader>(*fftProvider, currentMaxIRSamples, sampleRate);
     convolver = std::make_unique<morphir::DualMonoConvolver>(*fftProvider, currentMaxIRSamples, blockSize);
 
-    if (slotsReady())
-    {
-        rebindConvolverSlots();
-        convolver->startMorphing();
-    }
+    rebindConvolverSlots();
 }
 
 bool MorphIRProcessor::slotsReady() const
@@ -108,10 +104,28 @@ bool MorphIRProcessor::slotsReady() const
         && slotB.left.loaded && slotB.right.loaded;
 }
 
+bool MorphIRProcessor::anySlotReady() const
+{
+    return (slotA.left.loaded && slotA.right.loaded)
+        || (slotB.left.loaded && slotB.right.loaded);
+}
+
+// Binds whatever is loaded: both slots morph, a single slot convolves
+// statically, nothing leaves the engines untouched.
 void MorphIRProcessor::rebindConvolverSlots()
 {
     if (convolver == nullptr) return;
-    convolver->setSlots(slotA.left, slotB.left, slotA.right, slotB.right);
+
+    if (slotsReady())
+    {
+        convolver->setSlots(slotA.left, slotB.left, slotA.right, slotB.right);
+        convolver->startMorphing();
+    }
+    else if (anySlotReady())
+    {
+        const auto& bundle = (slotA.left.loaded && slotA.right.loaded) ? slotA : slotB;
+        convolver->setSingleSlot(bundle.left, bundle.right);
+    }
 }
 
 juce::String MorphIRProcessor::loadSlot(SlotId slot, const juce::File& file)
@@ -138,11 +152,7 @@ juce::String MorphIRProcessor::loadSlot(SlotId slot, const juce::File& file)
     else
         slotB = std::move(bundle);
 
-    if (slotsReady())
-    {
-        rebindConvolverSlots();
-        convolver->startMorphing();
-    }
+    rebindConvolverSlots();
 
     return {};
 }
@@ -189,7 +199,7 @@ void MorphIRProcessor::processBlock(juce::AudioBuffer<float>& buffer,
     // callbacks of any size into full engine blocks. If slots aren't fully
     // loaded, the wet path is silenced but keeps the same latency.
     const bool engineReady = blockAdapter != nullptr
-                          && convolver != nullptr && slotsReady();
+                          && convolver != nullptr && anySlotReady();
     if (engineReady)
         convolver->setMorphPosition(morphPositionParam->load());
 

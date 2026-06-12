@@ -108,6 +108,22 @@ public:
             expect(diff > 0.1f, "L and R outputs should differ when their IRs differ");
         }
 
+        beginTest("Single slot pair convolves without the morph thread");
+        {
+            morphir::DualMonoConvolver conv(*fft, maxIRSamples, blockSize);
+            conv.setSingleSlot(slotLeftA, slotRightA); // dirac 1.0 / dirac 0.25
+
+            std::vector<float> L(blockSize, 0.0f);
+            std::vector<float> R(blockSize, 0.0f);
+            L[0] = 1.0f;
+            R[0] = 1.0f;
+
+            conv.process(L.data(), R.data(), blockSize);
+
+            expectWithinAbsoluteError(L[0], 1.0f,  1e-4f);
+            expectWithinAbsoluteError(R[0], 0.25f, 1e-4f);
+        }
+
         beginTest("Morph thread updates both channels within one period");
         {
             morphir::DualMonoConvolver conv(*fft, maxIRSamples, blockSize);
