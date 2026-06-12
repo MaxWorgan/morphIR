@@ -74,6 +74,7 @@ add_executable(MorphIR_Tests
     tests/SpectralMorpherTest.cpp
     tests/MorphThreadTest.cpp
     tests/DualMonoConvolverTest.cpp
+    tests/BlockAdapterTest.cpp
     engine/fft/VDSPFFTProvider.cpp
     engine/nupc/NUPCEngine.cpp
     engine/nupc/DualMonoConvolver.cpp

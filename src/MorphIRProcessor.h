@@ -5,6 +5,7 @@
 #include "../engine/ir/IRSlot.h"
 #include "../engine/ir/IRLoader.h"
 #include "../engine/nupc/DualMonoConvolver.h"
+#include "../engine/util/BlockAdapter.h"
 
 class MorphIRProcessor : public juce::AudioProcessor
 {
@@ -83,6 +84,14 @@ private:
 
     // Pre-allocated copy buffer for the dry signal.
     juce::AudioBuffer<float> dryScratch;
+
+    // Buffers host callbacks of any size into fixed engine-sized blocks for
+    // the convolver (adds one engine block of latency, reported to the host).
+    std::unique_ptr<morphir::BlockAdapter> blockAdapter;
+
+    // Delays the dry signal by the same latency so dry and wet stay aligned.
+    juce::AudioBuffer<float> dryDelayBuffer;
+    int dryDelayPos = 0;
 
     std::atomic<float>* morphPositionParam = nullptr;
     std::atomic<float>* dryWetParam        = nullptr;

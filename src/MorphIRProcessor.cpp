@@ -60,6 +60,13 @@ void MorphIRProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 
     rebuildEngine(sampleRate, blockSizePow2);
 
+    blockAdapter = std::make_unique<morphir::BlockAdapter>(blockSizePow2, 2);
+    setLatencySamples(blockAdapter->latencySamples());
+
+    dryDelayBuffer.setSize(2, blockSizePow2, false, true, true);
+    dryDelayBuffer.clear();
+    dryDelayPos = 0;
+
     preDelaySize = static_cast<int>((kMaxPreDelayMs / 1000.0) * sampleRate) + 1;
     preDelayBuffer.setSize(2, preDelaySize, false, true, true);
     preDelayBuffer.clear();
@@ -178,17 +185,51 @@ void MorphIRProcessor::processBlock(juce::AudioBuffer<float>& buffer,
         preDelayWritePos = (preDelayWritePos + 1) % preDelaySize;
     }
 
-    // Convolve (in place). If slots aren't fully loaded, silence the wet path.
-    if (convolver != nullptr && slotsReady() && numSamples == currentBlockSize)
-    {
+    // Convolve (in place) via the block adapter, which collects host
+    // callbacks of any size into full engine blocks. If slots aren't fully
+    // loaded, the wet path is silenced but keeps the same latency.
+    const bool engineReady = blockAdapter != nullptr
+                          && convolver != nullptr && slotsReady();
+    if (engineReady)
         convolver->setMorphPosition(morphPositionParam->load());
-        convolver->process(buffer.getWritePointer(0),
-                           buffer.getWritePointer(1),
-                           numSamples);
+
+    if (blockAdapter != nullptr)
+    {
+        float* chans[2] = { buffer.getWritePointer(0), buffer.getWritePointer(1) };
+        blockAdapter->process(chans, numSamples,
+            [this, engineReady](float* const* ch, int n)
+            {
+                if (engineReady)
+                    convolver->process(ch[0], ch[1], n);
+                else
+                    for (int c = 0; c < 2; ++c)
+                        std::fill(ch[c], ch[c] + n, 0.0f);
+            });
     }
     else
     {
         buffer.clear();
+    }
+
+    // Delay the dry signal by the adapter latency so it stays time-aligned
+    // with the wet signal.
+    if (dryDelayBuffer.getNumSamples() > 0)
+    {
+        const int dlen = dryDelayBuffer.getNumSamples();
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            auto* ring = dryDelayBuffer.getWritePointer(ch);
+            auto* d    = dryScratch.getWritePointer(ch);
+            int pos = dryDelayPos;
+            for (int i = 0; i < numSamples; ++i)
+            {
+                const float delayed = ring[pos];
+                ring[pos] = d[i];
+                d[i] = delayed;
+                pos = (pos + 1) % dlen;
+            }
+        }
+        dryDelayPos = (dryDelayPos + numSamples) % dlen;
     }
 
     // Dry/wet mix.
