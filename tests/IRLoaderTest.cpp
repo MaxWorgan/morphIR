@@ -129,6 +129,62 @@ public:
                 expectWithinAbsoluteError(result.left.samples[i], 0.0f, 1e-9f);
         }
 
+        beginTest("IR is energy-normalised on load");
+        {
+            // 256 samples at 0.5 → energy 64. Without normalisation the
+            // convolution gain would be sqrt(64) = +18 dB.
+            const int len = 256;
+            juce::AudioBuffer<float> buf(1, len);
+            for (int i = 0; i < len; ++i)
+                buf.setSample(0, i, 0.5f);
+
+            juce::File f = writeTempWav(buf, targetRate);
+            morphir::IRLoader loader(*fftProvider, maxIR, targetRate);
+            auto result = loader.load(f);
+            f.deleteFile();
+
+            expect(result.error.isEmpty(), result.error);
+            double energy = 0.0;
+            for (float s : result.left.samples)
+                energy += static_cast<double>(s) * s;
+            expectWithinAbsoluteError(static_cast<float>(energy), 1.0f, 1e-3f);
+        }
+
+        beginTest("Normalisation preserves stereo balance");
+        {
+            const int len = 256;
+            juce::AudioBuffer<float> buf(2, len);
+            buf.clear();
+            buf.setSample(0, 0, 0.8f); // L impulse, louder
+            buf.setSample(1, 0, 0.4f); // R impulse, -6 dB relative to L
+
+            juce::File f = writeTempWav(buf, targetRate);
+            morphir::IRLoader loader(*fftProvider, maxIR, targetRate);
+            auto result = loader.load(f);
+            f.deleteFile();
+
+            expect(result.error.isEmpty(), result.error);
+            // Same scale factor on both channels: louder channel reaches
+            // unity energy, the L/R amplitude ratio stays 2:1.
+            expectWithinAbsoluteError(result.left.samples[0],  1.0f, 1e-3f);
+            expectWithinAbsoluteError(result.right.samples[0], 0.5f, 1e-3f);
+        }
+
+        beginTest("Silent file returns error");
+        {
+            const int len = 256;
+            juce::AudioBuffer<float> buf(1, len);
+            buf.clear();
+
+            juce::File f = writeTempWav(buf, targetRate);
+            morphir::IRLoader loader(*fftProvider, maxIR, targetRate);
+            auto result = loader.load(f);
+            f.deleteFile();
+
+            expect(result.error.isNotEmpty());
+            expect(!result.left.loaded);
+        }
+
         beginTest("Missing file returns error");
         {
             juce::File missing("/tmp/morphir_nonexistent_file_xyz.wav");

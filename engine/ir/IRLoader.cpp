@@ -5,12 +5,49 @@
 
 namespace morphir {
 
-static std::size_t nextPow2(std::size_t n)
+namespace {
+
+constexpr double kSilenceEnergyThreshold = 1.0e-12;
+
+std::size_t nextPow2(std::size_t n)
 {
     std::size_t p = 1;
     while (p < n) p <<= 1;
     return p;
 }
+
+// Returns the channel resampled to the target rate (or a straight copy when
+// the rates already match).
+std::vector<float> resampleToTarget(const float* samples, std::size_t count,
+                                    double srcRate, double targetRate)
+{
+    if (std::abs(srcRate - targetRate) <= 0.5)
+        return { samples, samples + count };
+
+    const double ratio = targetRate / srcRate;
+    const std::size_t outLen =
+        static_cast<std::size_t>(std::ceil(static_cast<double>(count) * ratio));
+
+    std::vector<float> resampled(outLen, 0.0f);
+    juce::LagrangeInterpolator interp;
+    interp.reset();
+    const int produced = interp.process(1.0 / ratio, samples,
+                                        resampled.data(), static_cast<int>(outLen));
+    resampled.resize(static_cast<std::size_t>(produced));
+    return resampled;
+}
+
+// Sum of squares over at most `limit` samples.
+double energyOf(const std::vector<float>& samples, std::size_t limit)
+{
+    double energy = 0.0;
+    const std::size_t n = std::min(samples.size(), limit);
+    for (std::size_t i = 0; i < n; ++i)
+        energy += static_cast<double>(samples[i]) * static_cast<double>(samples[i]);
+    return energy;
+}
+
+} // namespace
 
 IRLoader::IRLoader(FFTProvider& fft, std::size_t maxIRSamples, double targetSampleRate)
     : fft(fft)
@@ -21,36 +58,17 @@ IRLoader::IRLoader(FFTProvider& fft, std::size_t maxIRSamples, double targetSamp
     formatManager.registerBasicFormats(); // WAV + AIFF
 }
 
-IRSlot IRLoader::makeSlot(const float* samples, std::size_t count, double srcRate)
+IRSlot IRLoader::makeSlot(const std::vector<float>& resampled, double srcRate, float gain)
 {
     IRSlot slot;
     slot.originalSampleRate = srcRate;
+    slot.originalLength = std::min(resampled.size(), maxIRSamples);
+    slot.samples.assign(maxIRSamples, 0.0f);
 
-    std::vector<float> resampled;
-
-    if (std::abs(srcRate - targetSampleRate) > 0.5)
-    {
-        // Resample using JUCE's LagrangeInterpolator
-        const double ratio = targetSampleRate / srcRate;
-        const std::size_t outLen = static_cast<std::size_t>(std::ceil(static_cast<double>(count) * ratio));
-        resampled.resize(outLen, 0.0f);
-
-        juce::LagrangeInterpolator interp;
-        interp.reset();
-        int produced = interp.process(1.0 / ratio, samples, resampled.data(), static_cast<int>(outLen));
-        resampled.resize(static_cast<std::size_t>(produced));
-
-        slot.originalLength = std::min(resampled.size(), maxIRSamples);
-        slot.samples.assign(maxIRSamples, 0.0f);
-        std::copy(resampled.begin(), resampled.begin() + static_cast<std::ptrdiff_t>(slot.originalLength),
-                  slot.samples.begin());
-    }
-    else
-    {
-        slot.originalLength = std::min(count, maxIRSamples);
-        slot.samples.assign(maxIRSamples, 0.0f);
-        std::copy(samples, samples + slot.originalLength, slot.samples.begin());
-    }
+    std::transform(resampled.begin(),
+                   resampled.begin() + static_cast<std::ptrdiff_t>(slot.originalLength),
+                   slot.samples.begin(),
+                   [gain](float s) { return s * gain; });
 
     // Pre-compute FFT (zero-padded to fftSize)
     std::vector<float> padded(fftSize, 0.0f);
@@ -88,17 +106,28 @@ IRLoader::Result IRLoader::load(const juce::File& file)
     buf.clear();
     reader->read(&buf, 0, numSamples, 0, true, true);
 
-    if (numChannels == 1)
+    // Mono files are duplicated to both channels.
+    const float* srcL = buf.getReadPointer(0);
+    const float* srcR = (numChannels == 1) ? srcL : buf.getReadPointer(1);
+    const auto count  = static_cast<std::size_t>(numSamples);
+
+    const auto left  = resampleToTarget(srcL, count, srcRate, targetSampleRate);
+    const auto right = resampleToTarget(srcR, count, srcRate, targetSampleRate);
+
+    // Energy-normalise so convolution is roughly unity gain: scale by
+    // 1/sqrt(energy) of the louder channel, applied identically to both
+    // channels so the stereo balance of the IR is preserved.
+    const double energy = std::max(energyOf(left,  maxIRSamples),
+                                   energyOf(right, maxIRSamples));
+    if (energy <= kSilenceEnergyThreshold)
     {
-        // Mono: duplicate to both channels
-        result.left  = makeSlot(buf.getReadPointer(0), static_cast<std::size_t>(numSamples), srcRate);
-        result.right = makeSlot(buf.getReadPointer(0), static_cast<std::size_t>(numSamples), srcRate);
+        result.error = "IR file is silent: " + file.getFileName();
+        return result;
     }
-    else
-    {
-        result.left  = makeSlot(buf.getReadPointer(0), static_cast<std::size_t>(numSamples), srcRate);
-        result.right = makeSlot(buf.getReadPointer(1), static_cast<std::size_t>(numSamples), srcRate);
-    }
+    const float gain = static_cast<float>(1.0 / std::sqrt(energy));
+
+    result.left  = makeSlot(left,  srcRate, gain);
+    result.right = makeSlot(right, srcRate, gain);
 
     return result;
 }

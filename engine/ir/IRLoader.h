@@ -21,7 +21,7 @@ public:
     Result load(const juce::File& file);
 
 private:
-    IRSlot makeSlot(const float* samples, std::size_t count, double srcRate);
+    IRSlot makeSlot(const std::vector<float>& resampled, double srcRate, float gain);
 
     FFTProvider&            fft;
     std::size_t             maxIRSamples;
