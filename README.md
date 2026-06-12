@@ -91,4 +91,4 @@ Domain vocabulary is defined in [`CONTEXT.md`](CONTEXT.md).
 
 ## License
 
-GPL intended — to be confirmed when the LICENSE file is added.
+MorphIR is free software, released under the [GNU General Public License v3.0](LICENSE). JUCE is used under the terms of its GPLv3 option.
